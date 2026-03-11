@@ -45,6 +45,12 @@ class Player:
         self.death_explosion = None
         self.game = None  # Will be set by Game class
 
+        # Movement boundaries
+        self.min_x = 20
+        self.max_x = SCREEN_WIDTH - self.width - 20
+        self.min_y = SCREEN_HEIGHT // 2
+        self.max_y = SCREEN_HEIGHT - 150
+
     def draw(self, screen):
         if self.spawning:
             # Don't draw while spawning
@@ -140,13 +146,13 @@ class Player:
         if self.spawning:
             return
 
-        if direction == "left" and self.x > 20:
+        if direction == "left" and self.x > self.min_x:
             self.x -= self.speed
-        if direction == "right" and self.x < SCREEN_WIDTH - self.width - 20:
+        if direction == "right" and self.x < self.max_x:
             self.x += self.speed
-        if direction == "up" and self.y > SCREEN_HEIGHT // 2:
+        if direction == "up" and self.y > self.min_y:
             self.y -= self.speed
-        if direction == "down" and self.y < SCREEN_HEIGHT - 150:
+        if direction == "down" and self.y < self.max_y:
             self.y += self.speed
 
     def shoot(self):

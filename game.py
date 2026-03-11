@@ -60,6 +60,13 @@ class Game:
         self.power_up_info_text = ""
         self.power_up_info_timer = 0
 
+        # Mouse control settings
+        self.mouse_control_enabled = True
+        self.mouse_shooting_enabled = True
+        self.mouse_visible = True
+        self.mouse_target = None
+        self.mouse_target_timer = 0
+
         self.create_wave()
 
     def create_wave(self):
@@ -133,6 +140,18 @@ class Game:
         bullet_render = self.font_small.render(bullet_text, True, NEON_BLUE)
         self.screen.blit(bullet_render, (20, 60))
 
+        # Mouse control indicator
+        mouse_text = f"MOUSE: {'ON' if self.mouse_control_enabled else 'OFF'}"
+        mouse_color = GREEN if self.mouse_control_enabled else RED
+        mouse_render = self.font_small.render(mouse_text, True, mouse_color)
+        self.screen.blit(mouse_render, (SCREEN_WIDTH - 150, 60))
+
+        # Mouse shooting indicator
+        if self.mouse_control_enabled and self.mouse_shooting_enabled:
+            shoot_text = "CLICK TO SHOOT"
+            shoot_render = self.font_small.render(shoot_text, True, YELLOW)
+            self.screen.blit(shoot_render, (SCREEN_WIDTH - 200, 90))
+
         # Active power-ups with timers
         y_offset = 90
         for power_type in self.player.active_power_ups.keys():
@@ -169,15 +188,17 @@ class Game:
             y_offset += 30
 
         # Controls
-        controls_bg = pygame.Surface((280, 160), pygame.SRCALPHA)
+        controls_bg = pygame.Surface((300, 200), pygame.SRCALPHA)
         controls_bg.fill((0, 0, 0, 180))
-        self.screen.blit(controls_bg, (20, SCREEN_HEIGHT - 170))
+        self.screen.blit(controls_bg, (20, SCREEN_HEIGHT - 210))
 
         controls = [
             "🎮 CONTROLS:",
             "← → ↑ ↓ : MOVE",
-            "SPACE : SHOOT",
-            "CATCH POWER-UPS!",
+            "MOUSE : MOVE SHIP",
+            "LEFT CLICK : SHOOT",
+            "M : TOGGLE MOUSE",
+            "S : TOGGLE MOUSE SHOOT",
             "R : RESTART GAME",
             "ESC : QUIT GAME"
         ]
@@ -191,7 +212,25 @@ class Game:
                 font = pygame.font.Font(None, 22)
 
             control_text = font.render(text, True, color)
-            self.screen.blit(control_text, (30, SCREEN_HEIGHT - 160 + i * 26))
+            self.screen.blit(control_text, (30, SCREEN_HEIGHT - 200 + i * 22))
+
+        # Draw mouse target if active
+        if self.mouse_target_timer > 0:
+            mx, my = pygame.mouse.get_pos()
+            self.mouse_target_timer -= 1
+
+            # Draw crosshair
+            crosshair_color = YELLOW
+            crosshair_size = 20
+
+            # Horizontal line
+            pygame.draw.line(self.screen, crosshair_color,
+                             (mx - crosshair_size, my), (mx + crosshair_size, my), 2)
+            # Vertical line
+            pygame.draw.line(self.screen, crosshair_color,
+                             (mx, my - crosshair_size), (mx, my + crosshair_size), 2)
+            # Outer circle
+            pygame.draw.circle(self.screen, crosshair_color, (mx, my), crosshair_size, 2)
 
     def draw_power_up_info(self):
         if self.show_power_up_info and self.power_up_info_timer > 0:
@@ -245,8 +284,41 @@ class Game:
         self.screen.blit(wave_text, (SCREEN_WIDTH // 2 - wave_text.get_width() // 2, SCREEN_HEIGHT // 2 - 80))
         self.screen.blit(bonus_text, (SCREEN_WIDTH // 2 - bonus_text.get_width() // 2, SCREEN_HEIGHT // 2))
 
+    def handle_mouse_control(self):
+        """Handle mouse-based movement and shooting"""
+        if not self.mouse_control_enabled:
+            return
+
+        mx, my = pygame.mouse.get_pos()
+
+        # Constrain mouse position to valid movement area
+        # Player can't go above middle of screen
+        min_y = SCREEN_HEIGHT // 2
+        max_y = SCREEN_HEIGHT - 150
+        min_x = 20
+        max_x = SCREEN_WIDTH - self.player.width - 20
+
+        # Calculate target position (clamp to valid range)
+        target_x = max(min_x, min(mx - self.player.width // 2, max_x))
+        target_y = max(min_y, min(my - self.player.height // 2, max_y))
+
+        # Smooth movement towards mouse position
+        if not self.player.spawning:
+            # Move towards target with smoothing
+            dx = target_x - self.player.x
+            dy = target_y - self.player.y
+
+            # Apply smoothing (move 30% of the distance per frame)
+            self.player.x += dx * 0.3
+            self.player.y += dy * 0.3
+
+            # Ensure we don't overshoot boundaries
+            self.player.x = max(min_x, min(self.player.x, max_x))
+            self.player.y = max(min_y, min(self.player.y, max_y))
+
     def run(self):
         running = True
+        mouse_held = False
 
         while running:
             current_time = pygame.time.get_ticks()
@@ -260,6 +332,17 @@ class Game:
                     if event.key == pygame.K_ESCAPE:
                         running = False
 
+                    # Toggle mouse controls
+                    if event.key == pygame.K_m:
+                        self.mouse_control_enabled = not self.mouse_control_enabled
+                        # Show/hide system cursor
+                        pygame.mouse.set_visible(not self.mouse_control_enabled)
+                        self.mouse_visible = not self.mouse_control_enabled
+
+                    # Toggle mouse shooting
+                    if event.key == pygame.K_s:
+                        self.mouse_shooting_enabled = not self.mouse_shooting_enabled
+
                     if self.game_over:
                         if event.key == pygame.K_r:
                             self.__init__()
@@ -270,19 +353,47 @@ class Game:
                         self.__init__()
                         self.player.game = self
 
-            # Handle continuous key presses
+                # Mouse shooting
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if event.button == 1:  # Left click
+                        if self.mouse_shooting_enabled and not self.game_over and not self.wave_complete and self.game_started:
+                            if self.player.shoot_cooldown == 0:
+                                self.player.shoot()
+                                mouse_held = True
+                                # Show mouse target indicator
+                                self.mouse_target_timer = 10
+
+                if event.type == pygame.MOUSEBUTTONUP:
+                    if event.button == 1:
+                        mouse_held = False
+
+            # Handle continuous mouse shooting
+            if mouse_held and self.mouse_shooting_enabled and not self.game_over and not self.wave_complete and self.game_started:
+                if self.player.shoot_cooldown == 0:
+                    self.player.shoot()
+                    self.mouse_target_timer = 5
+
+            # Handle continuous key presses (keyboard controls)
             if not self.game_over and not self.wave_complete and self.game_started:
                 keys = pygame.key.get_pressed()
-                if keys[pygame.K_LEFT]:
-                    self.player.move("left")
-                if keys[pygame.K_RIGHT]:
-                    self.player.move("right")
-                if keys[pygame.K_UP]:
-                    self.player.move("up")
-                if keys[pygame.K_DOWN]:
-                    self.player.move("down")
+
+                # Only use keyboard movement if mouse controls are disabled
+                if not self.mouse_control_enabled:
+                    if keys[pygame.K_LEFT]:
+                        self.player.move("left")
+                    if keys[pygame.K_RIGHT]:
+                        self.player.move("right")
+                    if keys[pygame.K_UP]:
+                        self.player.move("up")
+                    if keys[pygame.K_DOWN]:
+                        self.player.move("down")
+
+                # Spacebar shooting always works regardless of mouse settings
                 if keys[pygame.K_SPACE] and self.player.shoot_cooldown == 0:
                     self.player.shoot()
+
+            # Handle mouse movement
+            self.handle_mouse_control()
 
             # Update game state
             if not self.game_over:
